@@ -23,7 +23,7 @@ jobs:
         run: |
           M="make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
           $M vendor/trinket-perf_defconfig vendor/xiaomi-trinket.config vendor/ginkgo.config
-          $M scripts_dtc
+          $M scripts
           out/scripts/dtc/dtc --version; dtc --version
           ls -l scripts/dtc | head -30
           git status --short | head
