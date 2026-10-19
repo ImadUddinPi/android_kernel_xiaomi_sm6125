@@ -45,7 +45,7 @@ jobs:
 
       - name: Configure
         run: |
-          M="make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          M="make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- DTC_EXT=/usr/bin/dtc"
           $M vendor/trinket-perf_defconfig vendor/xiaomi-trinket.config vendor/ginkgo.config
           scripts/config --file out/.config -e KSU
           $M olddefconfig
@@ -59,7 +59,7 @@ jobs:
       - name: Build
         run: |
           set -o pipefail
-          make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- 2>&1 | tee build.log | tail -n 40
+          make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- DTC_EXT=/usr/bin/dtc 2>&1 | tee build.log | tail -n 40
           ls -l out/arch/arm64/boot/
           strings out/arch/arm64/boot/Image.gz-dtb | head -0 || true
           grep -a -m1 'Linux version' out/include/generated/compile.h out/include/config/kernel.release || cat out/include/config/kernel.release
