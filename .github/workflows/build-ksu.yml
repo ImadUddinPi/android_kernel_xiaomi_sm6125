@@ -64,6 +64,14 @@ jobs:
           strings out/arch/arm64/boot/Image.gz-dtb | head -0 || true
           grep -a -m1 'Linux version' out/include/generated/compile.h out/include/config/kernel.release || cat out/include/config/kernel.release
 
+      - name: Diagnose DTS failure
+        if: failure()
+        run: |
+          f=$(ls out/arch/arm64/boot/dts/xiaomi/.ginkgo-trinket-overlay.dtbo.dts.tmp 2>/dev/null || true)
+          echo "tmp file: $f"
+          [ -n "$f" ] && { n=$(grep -n 'thermal_zones' "$f" | head -1 | cut -d: -f1); echo "first thermal_zones at line $n"; sed -n "$((n-40)),$((n+3))p" "$f"; }
+          cpp --version | head -1; echo "CPP used:"; grep -m3 -a 'dtc_cpp\|clang -E\|-x assembler-with-cpp' out/arch/arm64/boot/dts/xiaomi/.ginkgo-trinket-overlay.dtbo.cmd 2>/dev/null | cut -c1-700
+
       - name: Package AnyKernel3
         run: |
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3 ak3
