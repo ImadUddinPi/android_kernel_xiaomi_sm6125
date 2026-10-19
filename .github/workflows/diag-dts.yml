@@ -1,0 +1,39 @@
+name: Diagnose DTS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev device-tree-compiler gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+      - name: Clang
+        run: |
+          mkdir -p $HOME/clang
+          curl -fsSL --retry 5 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz" | tar -xz -C $HOME/clang
+          echo "$HOME/clang/bin" >> $GITHUB_PATH
+      - name: Configure and build dtc
+        run: |
+          M="make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          $M vendor/trinket-perf_defconfig vendor/xiaomi-trinket.config vendor/ginkgo.config
+          $M scripts_dtc
+          out/scripts/dtc/dtc --version; dtc --version
+          ls -l scripts/dtc | head -30
+          git status --short | head
+      - name: Try compiling the overlay by hand
+        continue-on-error: true
+        run: |
+          M="make O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          $M arch/arm64/boot/dts/xiaomi/ginkgo-trinket-overlay.dtbo V=1 2>&1 | tail -30 || true
+          T=out/arch/arm64/boot/dts/xiaomi/.ginkgo-trinket-overlay.dtbo.dts.tmp
+          ls -l $T || true
+          echo "== kernel dtc"; out/scripts/dtc/dtc -@ -I dts -O dtb -o /tmp/k.dtbo $T 2>&1 | head -5
+          echo "== system dtc"; dtc -@ -I dts -O dtb -o /tmp/s.dtbo $T 2>&1 | head -5; ls -l /tmp/*.dtbo
+          echo "== first lines after markers"; grep -v '^#' $T | grep -v '^$' | head -8
