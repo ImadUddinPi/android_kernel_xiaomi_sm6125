@@ -1,0 +1,109 @@
+name: Build ginkgo kernel + KernelSU-Next
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_ref:
+        description: KernelSU-Next legacy commit/branch
+        default: 0b17f24246db5c80c056b92c15bcad2b77f1276e
+
+env:
+  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz
+  ARCH: arm64
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev lz4 zip cpio python3 \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler ccache
+
+      - name: Fetch clang r416183b
+        run: |
+          mkdir -p $HOME/clang
+          curl -fsSL --retry 5 "$CLANG_URL" | tar -xz -C $HOME/clang
+          $HOME/clang/bin/clang --version | head -1
+          echo "$HOME/clang/bin" >> $GITHUB_PATH
+
+      - name: Integrate KernelSU-Next (legacy, manual hooks)
+        run: |
+          git clone https://github.com/KernelSU-Next/KernelSU-Next KernelSU-Next
+          git -C KernelSU-Next checkout "${{ inputs.ksu_ref }}"
+          git -C KernelSU-Next log -1 --format='KernelSU-Next %h %s'
+          ln -sfn ../KernelSU-Next/kernel drivers/kernelsu
+          grep -q kernelsu drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig || sed -i '$i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          tail -3 drivers/Kconfig
+          python3 ksu/apply_ksu.py
+
+      - name: Configure
+        run: |
+          M="make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
+          $M vendor/trinket-perf_defconfig vendor/xiaomi-trinket.config vendor/ginkgo.config
+          scripts/config --file out/.config -e KSU
+          $M olddefconfig
+          python3 - <<'PY'
+          import re
+          c=open('out/.config').read()
+          for k in ['CONFIG_KSU','CONFIG_KSU_MANUAL_HOOK','CONFIG_KPROBES','CONFIG_LOCALVERSION']:
+              m=re.search(r'^(%s[= ].*)$'%k,c,re.M); print(m.group(1) if m else k+' (absent)')
+          PY
+
+      - name: Build
+        run: |
+          set -o pipefail
+          make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- 2>&1 | tee build.log | tail -n 40
+          ls -l out/arch/arm64/boot/
+          strings out/arch/arm64/boot/Image.gz-dtb | head -0 || true
+          grep -a -m1 'Linux version' out/include/generated/compile.h out/include/config/kernel.release || cat out/include/config/kernel.release
+
+      - name: Package AnyKernel3
+        run: |
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 ak3
+          rm -rf ak3/.git ak3/.github ak3/README.md ak3/modules ak3/patch ak3/ramdisk
+          cat > ak3/anykernel.sh <<'AK'
+          ### AnyKernel3 Ramdisk Mod Script
+          properties() { '
+          kernel.string=ginkgo LineageOS 4.14.357 + KernelSU-Next (manual hooks)
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=ginkgo
+          device.name2=willow
+          supported.versions=
+          supported.patchlevels=
+          supported.vendorpatchlevels=
+          '; }
+          BLOCK=/dev/block/bootdevice/by-name/boot;
+          IS_SLOT_DEVICE=0;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          . tools/ak3-core.sh;
+          split_boot;
+          flash_boot;
+          AK
+          sed -i 's/^          //' ak3/anykernel.sh
+          mkdir -p dist
+          cp out/arch/arm64/boot/Image.gz-dtb ak3/ 2>/dev/null || { cp out/arch/arm64/boot/Image.gz ak3/; echo "no appended dtb image; shipping Image.gz"; }
+          [ -f out/arch/arm64/boot/dtbo.img ] && cp out/arch/arm64/boot/dtbo.img ak3/ || true
+          (cd ak3 && zip -r9 ../dist/ginkgo-ksunext-$(date +%Y%m%d).zip . -x '.*')
+          cp out/.config dist/config
+          cp out/arch/arm64/boot/Image.gz-dtb dist/ 2>/dev/null || true
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ginkgo-ksunext
+          path: |
+            dist/*
+            build.log
