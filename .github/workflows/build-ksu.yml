@@ -48,11 +48,15 @@ jobs:
           M="make -j$(nproc) O=out ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- DTC_EXT=/usr/bin/dtc"
           $M vendor/trinket-perf_defconfig vendor/xiaomi-trinket.config vendor/ginkgo.config
           scripts/config --file out/.config -e KSU
+          # Keep the release string identical to the shipped kernel so the ROM's prebuilt
+          # vendor modules (rmnet_perf, rmnet_shs, msm-geni-ir) still match vermagic, and
+          # stop forcing signatures, since this build generates its own signing key.
+          scripts/config --file out/.config -d LOCALVERSION_AUTO --set-str LOCALVERSION "-perf-g8aaa002bfb7b" -d MODULE_SIG_FORCE
           $M olddefconfig
           python3 - <<'PY'
           import re
           c=open('out/.config').read()
-          for k in ['CONFIG_KSU','CONFIG_KSU_MANUAL_HOOK','CONFIG_KPROBES','CONFIG_LOCALVERSION']:
+          for k in ['CONFIG_KSU','CONFIG_KSU_MANUAL_HOOK','CONFIG_KPROBES','CONFIG_LOCALVERSION','CONFIG_LOCALVERSION_AUTO','CONFIG_MODULE_SIG_FORCE']:
               m=re.search(r'^(%s[= ].*)$'%k,c,re.M); print(m.group(1) if m else k+' (absent)')
           PY
 
